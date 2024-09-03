@@ -425,3 +425,84 @@ class Peptide(typing.Sequence[str]):
         xle = self.sequence.count("J") / len(self.sequence)
         # return aliphatic index
         return (ala + 2.9 * val + 3.9 * (leu + ile + xle)) * 100
+    
+    def charge(self, pH: float = 7, pKscale: str = "Lehninger") -> float:
+        """Compute the theoretical net charge of a peptide sequence.
+        """
+        # get chosen the pKa scale
+        scale_pKa = tables.PK.get(pKscale)
+
+        if scale_pKa is None:
+            raise ValueError(f"Invalid pK scale: {scale!r}")
+        scale_sign = tables.CHARGE["sign"]
+
+        # build a look-up table for the pKa scale and the charge sign
+        lut_pKa = [scale_pKa.get(aa, 0.0) for aa in self._CODE1]
+        lut_sign = [scale_sign.get(aa, 0.0) for aa in self._CODE1]
+
+        # compute charge of each amino-acid, and sum
+        if numpy is None:
+            charge = 0.0
+            for aa in self.encoded:
+                pKa = lut_pKa[aa]
+                sign = lut_sign[aa]
+                charge += sign / (1.0 + 10 ** (sign * (pH - pKa)))
+        else:
+            pKa = numpy.take(lut_pKa, self.encoded)
+            sign = numpy.take(lut_sign, self.encoded)
+            charge = numpy.sum(sign / (1.0 + 10**(sign * (pH - pKa))))
+
+        # add charge for C-terminal and N-terminal ends of the peptide
+        if "nTer" in scale_pKa:
+            charge += 1.0 / (1.0 + 10 ** (pH - scale_pKa["nTer"]))
+        if "cTer" in scale_pKa:
+            charge += -1.0 / (1.0 + 10 ** (scale_pKa["cTer"] - pH))
+
+        # return the net protein charge
+        return charge
+    
+    def hydrophobic_moment(self, window: int = 11, angle: int = 100) -> float:
+
+        """Compute the maximal hydrophobic moment of a protein sequence.
+        """
+        window = min(window, len(self))
+        scale = tables.HYDROPHOBICITY["Eisenberg"]
+        lut = [scale.get(aa, 0.0) for aa in self._CODE1]
+        angles = [(angle * i) % 360 for i in range(window)]
+
+        if numpy is None:
+            angsin = [math.sin(math.radians(theta)) for theta in angles]
+            angcos = [math.cos(math.radians(theta)) for theta in angles]
+        else:
+            angsin = numpy.sin(numpy.radians(angles))
+            angcos = numpy.cos(numpy.radians(angles))
+
+        maxnorm = 0.0
+        for i in range(len(self.sequence) - window + 1):
+            # compute sin and cos of angles
+            if numpy is None:
+                sumsin = sumcos = 0
+                for aa, s, c in zip(self.encoded[i:i+window], angsin, angcos):
+                    sumsin += lut[aa]*s
+                    sumcos += lut[aa]*c
+            else:
+                hvec = numpy.take(lut, self.encoded[i:i+window])
+                sumsin = numpy.sum(hvec * angsin)
+                sumcos = numpy.sum(hvec * angcos)
+            # compute only the distance component (this way we can avoid
+            # computing the square root in each iteration)
+            norm = sumsin**2 + sumcos**2
+            if norm > maxnorm:
+                maxnorm = norm
+
+        # compute the angular moment from the norm
+        return math.sqrt(maxnorm) / window
+
+    def hydrophobicity(self, scale: str = "KyteDoolittle") -> float:
+        """Compute the hydrophobicity index of a protein sequence.
+        """
+        table = tables.HYDROPHOBICITY.get(scale)
+        if table is None:
+            raise ValueError(f"Invalid hydrophobicity scale: {scale!r}")
+        return _sum(self.profile(table)) / len(self)
+  
