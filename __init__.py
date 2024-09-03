@@ -13,11 +13,11 @@ import numpy
 
 class BLOSUMIndices(typing.NamedTuple):
 
-""" BLOSUM indices were derived of physicochemical properties that have
+    """BLOSUM indices were derived of physicochemical properties that have
     been subjected to a VARIMAX analysis and an alignment matrix of the
     20 natural AAs using the BLOSUM62 matrix.
-
     """
+
     blosum1: float
     blosum2: float
     blosum3: float
@@ -30,17 +30,20 @@ class BLOSUMIndices(typing.NamedTuple):
     blosum10: float
 
 class CrucianiProperties(typing.NamedTuple):
+
     """The Cruciani properties are a collection of scaled principal
     component scores that summarize a broad set of descriptors
     calculated based on the interaction of each amino acid residue with
     several chemical groups (or "probes"), such as charged ions, methyl,
     hydroxyl groups, and so forth."""
+
     pp1: float
     pp2: float
     pp3: float
 
 
 class FasgaiVectors(typing.NamedTuple):
+
     """ The FASGAI vectors (Factor Analysis Scales of Generalized Amino
     Acid Information) are a set of amino acid descriptors, that reflect
     hydrophobicity, alpha and turn propensities, bulky properties,
@@ -48,6 +51,7 @@ class FasgaiVectors(typing.NamedTuple):
     properties, that can be utilized to represent the sequence
     structural features of peptides or protein motifs.
     """
+
     f1: float
     f2: float
     f3: float
@@ -57,6 +61,7 @@ class FasgaiVectors(typing.NamedTuple):
 
 
 class KideraFactors(typing.NamedTuple):
+
     """ The Kidera Factors were originally derived by applying multivariate
     analysis to 188 physical properties of the 20 amino acids and using
     dimension reduction techniques.
@@ -74,6 +79,7 @@ class KideraFactors(typing.NamedTuple):
 
 
 class MSWHIMScores(typing.NamedTuple):
+
     """MS-WHIM scores were derived from 36 electrostatic potential
     properties derived from the three-dimensional structure of the
     20 natural amino acids.
@@ -84,6 +90,7 @@ class MSWHIMScores(typing.NamedTuple):
 
 
 class PhysicalDescriptors(typing.NamedTuple):
+
     """The PP descriptors were constructed by improving on existing
     PCA-derived descriptors
     """
@@ -92,6 +99,7 @@ class PhysicalDescriptors(typing.NamedTuple):
 
 
 class PCPDescriptors(typing.NamedTuple):
+    
     """The Physical-Chemical Properties descriptors of a peptide.
     """
     e1: float
@@ -209,8 +217,10 @@ class ZScales(typing.NamedTuple):
     z5: float
 
 class Peptide(typing.Sequence[str]):
+
     """A sequence of amino acids.
     """
+
     # fmt: off
     _CODE1 = [
         "A", "R", "N", "D", "C", "Q", "E", "G", "H", "I",
@@ -224,6 +234,7 @@ class Peptide(typing.Sequence[str]):
         "Leu", "Lys", "Met", "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
         "Pyl", "Sec", "Asx", "Glx", "Xle", "Xaa"
     ]
+
     @classmethod
     def sample(
         cls,
@@ -287,13 +298,6 @@ class Peptide(typing.Sequence[str]):
 
     def descriptors(self) -> typing.Dict[str, float]:
         """Create a dictionary containing every protein descriptor available.
-        Example:
-            >>> peptide = Peptide("SDKEVDEVDAALSDLEITLE")
-            >>> sorted(peptide.descriptors().keys())
-            ['BLOSUM1', ..., 'F1', ..., 'KF1', ..., 'MSWHIM1', ..., 'PP1', ...]
-        Hint:
-            Use this method to create a `~pandas.DataFrame` containing the
-            descriptors for several sequences.
         """
         d = {}
         for prefix, method in self.__DESCRIPTORS.items():
@@ -316,9 +320,9 @@ class Peptide(typing.Sequence[str]):
         """
         # center the table if requested
         if center:
-            mu = statistics.mean(table.values())
-            sigma = statistics.stdev(table.values())
-            table = {k: (v - mu) / sigma for k, v in table.items()}
+          mu = statistics.mean(table.values())
+          sigma = statistics.stdev(table.values())
+          table = {k: (v - mu) / sigma for k, v in table.items()}
         # build look up table
         lut = [table.get(aa, 0.0) for aa in self._CODE1]
         # compute using Cruciani formula
@@ -339,11 +343,6 @@ class Peptide(typing.Sequence[str]):
     ) -> float:
         """Compute the auto-covariance index of a peptide sequence.
         """
-        # center the table if requested
-        if center:
-            mu = statistics.mean(table.values())
-            sigma = statistics.stdev(table.values())
-            table = {k: (v - mu) / sigma for k, v in table.items()}
         # build the lookup table
         lut = [table.get(aa, 0.0) for aa in self._CODE1]
         # compute correlation using Cruciani formula
@@ -357,39 +356,6 @@ class Peptide(typing.Sequence[str]):
             s = numpy.sum(v1*v2)
         return s / len(self)
 
-    def cross_covariance(
-        self,
-        table1: typing.Dict[str, float],
-        table2: typing.Dict[str, float],
-        lag: int = 1,
-        center: bool = True,
-    ) -> float:
-        """Compute the cross-covariance index of a peptide sequence.
-        """
-        # center the tables if requested
-        if center:
-            mu1 = statistics.mean(table1.values())
-            sigma1 = statistics.stdev(table1.values())
-            table1 = {k: (v - mu1) / sigma1 for k, v in table1.items()}
-            mu2 = statistics.mean(table2.values())
-            sigma2 = statistics.stdev(table2.values())
-            table2 = {k: (v - mu2) / sigma2 for k, v in table2.items()}
-
-        # build the lookup table
-        lut1 = [table1.get(aa, 0.0) for aa in self._CODE1]
-        lut2 = [table2.get(aa, 0.0) for aa in self._CODE1]
-
-        # compute using Cruciani formula
-        if numpy is None:
-            s = 0.0
-            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
-                s += lut1[aa1] * lut2[aa2]
-        else:
-            v1 = numpy.take(lut1, self.encoded[:-lag])
-            v2 = numpy.take(lut2, self.encoded[lag:])
-            s = numpy.sum(v1*v2)
-        return s / len(self)
-
     def profile(
         self,
         table: typing.Dict[str, float],
@@ -397,28 +363,6 @@ class Peptide(typing.Sequence[str]):
         default: float = 0.0,
     ) -> typing.Sequence[float]:
         """Compute a generic per-residue profile from per-residue indices.
-        Arguments:
-            table (`dict`): The values per residue to apply to the whole
-                protein sequence.
-            window (`int`): The window size for computing the profile.
-                Leave as *1* to return per-residue values.
-            default (`float`): The default value to use for amino-acids
-                that are not present in the given table.
-
-        Returns:
-            `collections.abc.Sequence` of `float`: The per-residue profile
-            values, averaged in the given window size. When ``window`` is
-            larger than the available number of resiudes, an empty sequence
-            is returned.
-
-        Example:
-            >>> peptide = Peptide("PKLVCLKKC")
-            >>> peptide.profile(peptides.tables.CHARGE['sign'])
-            [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 1.0, 1.0, -1.0]
-            >>> peptide.profile(peptides.tables.MOLECULAR_WEIGHT['expasy'], 5)
-            [108..., 111..., 111..., 114..., 115...]
-
-        .. versionadded:: 0.3.0
         """
         if window < 1:
             raise ValueError("Window must be strictly positive")
@@ -450,3 +394,20 @@ class Peptide(typing.Sequence[str]):
             p = []
 
         return p
+    
+    def counts(self) -> typing.Dict[str, int]:
+        """Return a table of amino-acid counts in the peptide.
+        """
+    
+        return {
+            aa: self.sequence.count(aa)
+            for aa in self._CODE1
+        }
+
+    def frequencies(self) -> typing.Dict[str, float]:
+        """Return a table of amino-acid frequencies in the peptide.
+        """
+        return {
+            aa:count/len(self)
+            for aa,count in self.counts().items()
+        }
