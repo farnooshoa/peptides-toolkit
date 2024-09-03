@@ -224,3 +224,229 @@ class Peptide(typing.Sequence[str]):
         "Leu", "Lys", "Met", "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
         "Pyl", "Sec", "Asx", "Glx", "Xle", "Xaa"
     ]
+    @classmethod
+    def sample(
+        cls,
+        length: int,
+        frequencies: str = "SwissProt2021",
+    ) -> "Peptide":
+        """Generate a peptide with the given amino-acid frequencies.
+        """
+        table = tables.AA_FREQUENCIES.get(frequencies)
+        if table is None:
+            raise ValueError(f"Invalid amino acid frequencies: {frequencies!r}")
+
+        if length == 0:
+            return cls("")
+
+        cumfreq = 0
+        cumulative_frequencies = {}
+        for k,v in table.items():
+            cumfreq += v
+            cumulative_frequencies[k] = cumfreq
+
+        residues = ["M"]
+        for i in range(1, length):
+            x = random.random()
+            r = next((k for k,v in cumulative_frequencies.items() if x <= v), "X")
+            residues.append(r)
+
+        return cls("".join(residues))
+
+    def __init__(self, sequence: str) -> None:
+        """Create a new peptide object with the given sequence.
+        """
+        # store the sequence in text format
+        self.sequence: str = sequence
+        # store an encoded version of the sequence as an array of indices
+        encoder = {aa:i for i,aa in enumerate(self._CODE1)}
+        self.encoded = array.array('B')
+        for i, aa in enumerate(sequence):
+            self.encoded.append(encoder.get(aa, encoder["X"]))
+
+    def __len__(self) -> int:
+        return len(self.sequence)
+
+    @typing.overload
+    def __getitem__(self, index: slice) -> "Peptide":
+        pass
+
+    @typing.overload
+    def __getitem__(self, index: int) -> str:
+        pass
+
+    def __getitem__(
+        self, index: typing.Union[int, slice]
+    ) -> typing.Union[str, "Peptide"]:
+        if isinstance(index, slice):
+            return Peptide(self.sequence[index])
+        return self.sequence[index]
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.sequence!r})"
+
+    def descriptors(self) -> typing.Dict[str, float]:
+        """Create a dictionary containing every protein descriptor available.
+        Example:
+            >>> peptide = Peptide("SDKEVDEVDAALSDLEITLE")
+            >>> sorted(peptide.descriptors().keys())
+            ['BLOSUM1', ..., 'F1', ..., 'KF1', ..., 'MSWHIM1', ..., 'PP1', ...]
+        Hint:
+            Use this method to create a `~pandas.DataFrame` containing the
+            descriptors for several sequences.
+        """
+        d = {}
+        for prefix, method in self.__DESCRIPTORS.items():
+            for i, x in enumerate(method(self)):
+                d[f"{prefix}{i+1}"] = x
+        return d
+
+    def auto_correlation(
+        self, table: typing.Dict[str, float], lag: int = 1, center: bool = True
+    ) -> float:
+        """Compute the auto-correlation index of a peptide sequence.
+
+        Example:
+            >>> peptide = Peptide("SDKEVDEVDAALSDLEITLE")
+            >>> table = peptides.tables.HYDROPHOBICITY["KyteDoolittle"]
+            >>> peptide.auto_correlation(table=table)
+            -0.3519908...
+            >>> peptide.auto_correlation(table=table, lag=5)
+            0.00113355...
+        """
+        # center the table if requested
+        if center:
+            mu = statistics.mean(table.values())
+            sigma = statistics.stdev(table.values())
+            table = {k: (v - mu) / sigma for k, v in table.items()}
+        # build look up table
+        lut = [table.get(aa, 0.0) for aa in self._CODE1]
+        # compute using Cruciani formula
+        if numpy is None:
+            s1 = s2 = 0.0
+            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
+                s1 += lut[aa1] * lut[aa2]
+                s2 += lut[aa1] ** 2
+        else:
+            v1 = numpy.take(lut, self.encoded[:-lag])
+            v2 = numpy.take(lut, self.encoded[lag:])
+            s1 = numpy.sum(v1*v2)
+            s2 = numpy.sum(v1**2)
+        return s1 / s2
+
+    def auto_covariance(
+        self, table: typing.Dict[str, float], lag: int = 1, center: bool = True
+    ) -> float:
+        """Compute the auto-covariance index of a peptide sequence.
+        """
+        # center the table if requested
+        if center:
+            mu = statistics.mean(table.values())
+            sigma = statistics.stdev(table.values())
+            table = {k: (v - mu) / sigma for k, v in table.items()}
+        # build the lookup table
+        lut = [table.get(aa, 0.0) for aa in self._CODE1]
+        # compute correlation using Cruciani formula
+        if numpy is None:
+            s = 0.0
+            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
+                s += lut[aa1] * lut[aa2]
+        else:
+            v1 = numpy.take(lut, self.encoded[:-lag])
+            v2 = numpy.take(lut, self.encoded[lag:])
+            s = numpy.sum(v1*v2)
+        return s / len(self)
+
+    def cross_covariance(
+        self,
+        table1: typing.Dict[str, float],
+        table2: typing.Dict[str, float],
+        lag: int = 1,
+        center: bool = True,
+    ) -> float:
+        """Compute the cross-covariance index of a peptide sequence.
+        """
+        # center the tables if requested
+        if center:
+            mu1 = statistics.mean(table1.values())
+            sigma1 = statistics.stdev(table1.values())
+            table1 = {k: (v - mu1) / sigma1 for k, v in table1.items()}
+            mu2 = statistics.mean(table2.values())
+            sigma2 = statistics.stdev(table2.values())
+            table2 = {k: (v - mu2) / sigma2 for k, v in table2.items()}
+
+        # build the lookup table
+        lut1 = [table1.get(aa, 0.0) for aa in self._CODE1]
+        lut2 = [table2.get(aa, 0.0) for aa in self._CODE1]
+
+        # compute using Cruciani formula
+        if numpy is None:
+            s = 0.0
+            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
+                s += lut1[aa1] * lut2[aa2]
+        else:
+            v1 = numpy.take(lut1, self.encoded[:-lag])
+            v2 = numpy.take(lut2, self.encoded[lag:])
+            s = numpy.sum(v1*v2)
+        return s / len(self)
+
+    def profile(
+        self,
+        table: typing.Dict[str, float],
+        window: int = 1,
+        default: float = 0.0,
+    ) -> typing.Sequence[float]:
+        """Compute a generic per-residue profile from per-residue indices.
+        Arguments:
+            table (`dict`): The values per residue to apply to the whole
+                protein sequence.
+            window (`int`): The window size for computing the profile.
+                Leave as *1* to return per-residue values.
+            default (`float`): The default value to use for amino-acids
+                that are not present in the given table.
+
+        Returns:
+            `collections.abc.Sequence` of `float`: The per-residue profile
+            values, averaged in the given window size. When ``window`` is
+            larger than the available number of resiudes, an empty sequence
+            is returned.
+
+        Example:
+            >>> peptide = Peptide("PKLVCLKKC")
+            >>> peptide.profile(peptides.tables.CHARGE['sign'])
+            [0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 1.0, 1.0, -1.0]
+            >>> peptide.profile(peptides.tables.MOLECULAR_WEIGHT['expasy'], 5)
+            [108..., 111..., 111..., 114..., 115...]
+
+        .. versionadded:: 0.3.0
+        """
+        if window < 1:
+            raise ValueError("Window must be strictly positive")
+
+        # skip computing profile is window is larger than the available
+        # number of residues in the peptide sequence
+        if len(self) >= window:
+            # build a look-up table and index values
+            lut = [table.get(aa, default) for aa in self._CODE1]
+            if numpy is None:
+                values = [lut[i] for i in self.encoded]
+            else:
+                values = numpy.take(lut, self.encoded)  # type: ignore
+            # don't perform window averaging if window is 1
+            if window <= 1:
+                return list(values)
+            elif window > 1:
+                p = []
+                # use a rolling sum over the window
+                s = 0.0
+                for i in range(window):
+                    s += values[i]
+                for j in range(window, len(self)):
+                    p.append(s / window)
+                    s -= values[j-window]
+                    s += values[j]
+                p.append(s / window)
+        else:
+            p = []
+
+        return p
