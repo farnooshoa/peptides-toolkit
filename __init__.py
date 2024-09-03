@@ -505,4 +505,53 @@ class Peptide(typing.Sequence[str]):
         if table is None:
             raise ValueError(f"Invalid hydrophobicity scale: {scale!r}")
         return _sum(self.profile(table)) / len(self)
-  
+    def instability_index(self) -> float:
+        
+        """Compute the instability index of a protein sequence.
+        """
+        scale = tables.INSTABILITY["Guruprasad"]
+        gp = sum(scale.get(self.sequence[i : i + 2], 1.0) for i in range(len(self.sequence) - 1))
+        return gp * 10 / (len(self.sequence))
+    def molecular_weight(
+        self,
+        average: str = "expasy",
+        aa_shift: typing.Union[str, typing.Dict[str, float], None] = None,
+    ) -> float:
+        
+        """Compute the molecular weight of a protein sequence.
+        """
+        scale = tables.MOLECULAR_WEIGHT.get(average)
+        if scale is None:
+            raise ValueError(f"Invalid average weight scale: {average!r}")
+
+        # sum the weight of each amino acid and add weight of water molecules
+        mass = _sum(self.profile(scale)) + scale["H2O"]
+        # add mass shift for labeled proteins
+        if aa_shift is not None:
+            mass += self.mass_shift(
+                aa_shift=aa_shift, monoisotopic=average == "monoisotopic"
+            )
+
+        return mass
+    
+    def mz(
+        self,
+        charge: int = 2,
+        aa_shift: typing.Union[str, typing.Dict[str, float], None] = None,
+        cysteins: float = 57.021464,
+    ) -> float:
+        """Compute the m/z (mass over charge) ratio for a peptide.
+        """
+        if not isinstance(charge, int):
+            raise TypeError(f"Expected int, found {charge.__class__.__name__!r}")
+
+        # compute the mass of the uncharged peptide
+        mass = self.molecular_weight(average="monoisotopic", aa_shift=aa_shift)
+        # add modification at cysteins
+        mass += self.sequence.count("C") * cysteins
+        # modify for charged peptides
+        if charge >= 0:
+            mass += charge * 1.007276  # weights of H+1 ions
+            mass /= charge  # divide by charge state
+
+        return mass
