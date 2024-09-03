@@ -411,3 +411,17 @@ class Peptide(typing.Sequence[str]):
             aa:count/len(self)
             for aa,count in self.counts().items()
         }
+    
+    def aliphatic_index(self) -> float:
+        """Compute the aliphatic index of the peptide.
+        """
+    
+        # count aliphatic residues
+        ala = self.sequence.count("A") / len(self.sequence)
+        val = self.sequence.count("V") / len(self.sequence)
+        leu = self.sequence.count("L") / len(self.sequence)
+        ile = self.sequence.count("I") / len(self.sequence)
+        # support unknown Leu/Ile residues
+        xle = self.sequence.count("J") / len(self.sequence)
+        # return aliphatic index
+        return (ala + 2.9 * val + 3.9 * (leu + ile + xle)) * 100
