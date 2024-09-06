@@ -10,6 +10,11 @@ import random
 import statistics
 import typing
 import numpy
+
+from . import tables
+
+
+
 class Peptide(typing.Sequence[str]):
 
     """A sequence of amino acids.
@@ -35,9 +40,12 @@ class Peptide(typing.Sequence[str]):
         length: int,
         frequencies: str = "SwissProt2021",
     ) -> "Peptide":
+        
         """Generate a peptide with the given amino-acid frequencies.
         """
+
         table = tables.AA_FREQUENCIES.get(frequencies)
+
         if table is None:
             raise ValueError(f"Invalid amino acid frequencies: {frequencies!r}")
 
@@ -49,6 +57,8 @@ class Peptide(typing.Sequence[str]):
         for k,v in table.items():
             cumfreq += v
             cumulative_frequencies[k] = cumfreq
+
+# The first amino-acid will always be a Methionine for biological accuracy
 
         residues = ["M"]
         for i in range(1, length):
@@ -87,9 +97,6 @@ class Peptide(typing.Sequence[str]):
             return Peptide(self.sequence[index])
         return self.sequence[index]
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.sequence!r})"
-
     def descriptors(self) -> typing.Dict[str, float]:
         """Create a dictionary containing every protein descriptor available.
         """
@@ -102,15 +109,7 @@ class Peptide(typing.Sequence[str]):
     def auto_correlation(
         self, table: typing.Dict[str, float], lag: int = 1, center: bool = True
     ) -> float:
-        """Compute the auto-correlation index of a peptide sequence.
-
-        Example:
-            >>> peptide = Peptide("SDKEVDEVDAALSDLEITLE")
-            >>> table = peptides.tables.HYDROPHOBICITY["KyteDoolittle"]
-            >>> peptide.auto_correlation(table=table)
-            -0.3519908...
-            >>> peptide.auto_correlation(table=table, lag=5)
-            0.00113355...
+        """Compute the auto-correlation index of a peptide sequence with Cruciani Formula 
         """
         # center the table if requested
         if center:
@@ -120,16 +119,10 @@ class Peptide(typing.Sequence[str]):
         # build look up table
         lut = [table.get(aa, 0.0) for aa in self._CODE1]
         # compute using Cruciani formula
-        if numpy is None:
-            s1 = s2 = 0.0
-            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
-                s1 += lut[aa1] * lut[aa2]
-                s2 += lut[aa1] ** 2
-        else:
-            v1 = numpy.take(lut, self.encoded[:-lag])
-            v2 = numpy.take(lut, self.encoded[lag:])
-            s1 = numpy.sum(v1*v2)
-            s2 = numpy.sum(v1**2)
+        v1 = numpy.take(lut, self.encoded[:-lag])
+        v2 = numpy.take(lut, self.encoded[lag:])
+        s1 = numpy.sum(v1*v2)
+        s2 = numpy.sum(v1**2)
         return s1 / s2
 
     def auto_covariance(
@@ -140,14 +133,10 @@ class Peptide(typing.Sequence[str]):
         # build the lookup table
         lut = [table.get(aa, 0.0) for aa in self._CODE1]
         # compute correlation using Cruciani formula
-        if numpy is None:
-            s = 0.0
-            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
-                s += lut[aa1] * lut[aa2]
-        else:
-            v1 = numpy.take(lut, self.encoded[:-lag])
-            v2 = numpy.take(lut, self.encoded[lag:])
-            s = numpy.sum(v1*v2)
+ 
+        v1 = numpy.take(lut, self.encoded[:-lag])
+        v2 = numpy.take(lut, self.encoded[lag:])
+        s = numpy.sum(v1*v2)
         return s / len(self)
 
     def profile(
@@ -166,10 +155,8 @@ class Peptide(typing.Sequence[str]):
         if len(self) >= window:
             # build a look-up table and index values
             lut = [table.get(aa, default) for aa in self._CODE1]
-            if numpy is None:
-                values = [lut[i] for i in self.encoded]
-            else:
-                values = numpy.take(lut, self.encoded)  # type: ignore
+            
+            values = numpy.take(lut, self.encoded)  # type: ignore
             # don't perform window averaging if window is 1
             if window <= 1:
                 return list(values)
@@ -220,6 +207,12 @@ class Peptide(typing.Sequence[str]):
         # return aliphatic index
         return (ala + 2.9 * val + 3.9 * (leu + ile + xle)) * 100
     
+    def boman(self) -> float:
+        """Compute the Boman (potential peptide interaction) index.
+
+        """
+        return -_sum(self.profile(tables.BOMAN["Boman"])) / len(self)
+    
     def charge(self, pH: float = 7, pKscale: str = "Lehninger") -> float:
         """Compute the theoretical net charge of a peptide sequence.
         """
@@ -235,16 +228,10 @@ class Peptide(typing.Sequence[str]):
         lut_sign = [scale_sign.get(aa, 0.0) for aa in self._CODE1]
 
         # compute charge of each amino-acid, and sum
-        if numpy is None:
-            charge = 0.0
-            for aa in self.encoded:
-                pKa = lut_pKa[aa]
-                sign = lut_sign[aa]
-                charge += sign / (1.0 + 10 ** (sign * (pH - pKa)))
-        else:
-            pKa = numpy.take(lut_pKa, self.encoded)
-            sign = numpy.take(lut_sign, self.encoded)
-            charge = numpy.sum(sign / (1.0 + 10**(sign * (pH - pKa))))
+
+        pKa = numpy.take(lut_pKa, self.encoded)
+        sign = numpy.take(lut_sign, self.encoded)
+        charge = numpy.sum(sign / (1.0 + 10**(sign * (pH - pKa))))
 
         # add charge for C-terminal and N-terminal ends of the peptide
         if "nTer" in scale_pKa:
@@ -299,6 +286,7 @@ class Peptide(typing.Sequence[str]):
         if table is None:
             raise ValueError(f"Invalid hydrophobicity scale: {scale!r}")
         return _sum(self.profile(table)) / len(self)
+    
     def instability_index(self) -> float:
         
         """Compute the instability index of a protein sequence.
@@ -306,6 +294,54 @@ class Peptide(typing.Sequence[str]):
         scale = tables.INSTABILITY["Guruprasad"]
         gp = sum(scale.get(self.sequence[i : i + 2], 1.0) for i in range(len(self.sequence) - 1))
         return gp * 10 / (len(self.sequence))
+    
+    def isoelectric_point(self, pKscale: str = "EMBOSS") -> float:
+        """Compute the isoelectric point of a protein sequence.
+        """
+        # use a simple bissecting loop to minimize the charge function
+        top, bottom, x = 0.0, 14.0, 7.0
+        while not math.isclose(top, bottom):
+            x = (top + bottom) / 2
+            c = self.charge(pH=x, pKscale=pKscale)
+            if c >= 0:
+                top = x
+            if c <= 0:
+                bottom = x
+        return x
+    def mass_shift(
+        self,
+        aa_shift: typing.Union[str, typing.Dict[str, float], None] = "silac_13c",
+        monoisotopic: bool = True,
+    ) -> float:
+        """Compute the mass difference of modified peptides.
+        """
+        if isinstance(aa_shift, str):
+            table = tables.MASS_SHIFT.get(aa_shift)
+            if table is None:
+                raise ValueError(f"Invalid mass shift scale: {aa_shift!r}")
+            scale = {}
+            if aa_shift == "silac_13c":
+                scale["K"] = table["K"] - 0.064229 * (not monoisotopic)
+                scale["R"] = table["R"] - 0.064229 * (not monoisotopic)
+            elif aa_shift == "silac_13c15n":
+                scale["K"] = table["K"] - 0.071499 * (not monoisotopic)
+                scale["R"] = table["R"] - 0.078669 * (not monoisotopic)
+            elif aa_shift == "15n":
+                for k, v in table.items():
+                    scale[k] = v * 0.997035 - 0.003635 * (not monoisotopic)
+        elif isinstance(aa_shift, dict):
+            scale = aa_shift
+        else:
+            raise TypeError(
+                f"Expected str or dict, found {aa_shift.__class__.__name__}"
+            )
+
+        # sum the mass-shift of each amino acid
+        shift = _sum(self.profile(scale))
+        # return the shift with C-terminal and N-terminal ends
+        return shift + scale.get("nTer", 0.0) + scale.get("cTer", 0.0)
+
+    
     def molecular_weight(
         self,
         average: str = "expasy",
@@ -349,3 +385,55 @@ class Peptide(typing.Sequence[str]):
             mass /= charge  # divide by charge state
 
         return mass
+
+    def hydrophobicity_profile(
+        self, window: int = 11, scale: str = "KyteDoolittle"
+    ) -> typing.Sequence[float]:
+        """Build a hydrophobicity profile of a sliding window.
+        """
+        if scale not in tables.HYDROPHOBICITY:
+            raise ValueError(f"Invalid hydrophobicity scale: {scale!r}")
+
+        profile = array.array('f')
+        for i in range(len(self.sequence) - window + 1):
+            profile.append(self[i : i + window].hydrophobicity(scale=scale))
+
+        return profile
+
+    def hydrophobic_moment_profile(
+        self, window: int = 11, angle: int = 100
+    ) -> typing.Sequence[float]:
+        """Build a hydrophobic moment profile of a sliding window.
+
+        """
+        profile = array.array("f")
+        for i in range(len(self.sequence) - window + 1):
+            profile.append(
+                self[i : i + window].hydrophobic_moment(window=window - 1, angle=angle)
+            )
+
+        return profile
+
+    def membrane_position_profile(
+        self, window: int = 11, angle: int = 100
+    ) -> typing.List[str]:
+        """Compute the theoretical class of a protein sequence
+     
+        """
+        profile_H = self.hydrophobicity_profile(window=window, scale="Eisenberg")
+        profile_uH = self.hydrophobic_moment_profile(window=window, angle=angle)
+
+        profile = []
+        for h, uh in zip(profile_H, profile_uH):
+            m = h * -0.421 + 0.579
+            if uh <= m:
+                if h >= 0.5:
+                    profile.append("T")
+                else:
+                    profile.append("G")
+            else:
+                profile.append("S")
+
+        return profile
+
+   
