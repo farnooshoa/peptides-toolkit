@@ -138,6 +138,39 @@ class Peptide(typing.Sequence[str]):
         v2 = numpy.take(lut, self.encoded[lag:])
         s = numpy.sum(v1*v2)
         return s / len(self)
+    
+    def cross_covariance(
+        self,
+        table1: typing.Dict[str, float],
+        table2: typing.Dict[str, float],
+        lag: int = 1,
+        center: bool = True,
+    ) -> float:
+        """Compute the cross-covariance index of a peptide sequence.
+        """
+        # center the tables if requested
+        if center:
+            mu1 = statistics.mean(table1.values())
+            sigma1 = statistics.stdev(table1.values())
+            table1 = {k: (v - mu1) / sigma1 for k, v in table1.items()}
+            mu2 = statistics.mean(table2.values())
+            sigma2 = statistics.stdev(table2.values())
+            table2 = {k: (v - mu2) / sigma2 for k, v in table2.items()}
+
+        # build the lookup table
+        lut1 = [table1.get(aa, 0.0) for aa in self._CODE1]
+        lut2 = [table2.get(aa, 0.0) for aa in self._CODE1]
+
+        # compute using Cruciani formula
+        if numpy is None:
+            s = 0.0
+            for aa1, aa2 in zip(self.encoded[:-lag], self.encoded[lag:]):
+                s += lut1[aa1] * lut2[aa2]
+        else:
+            v1 = numpy.take(lut1, self.encoded[:-lag])
+            v2 = numpy.take(lut2, self.encoded[lag:])
+            s = numpy.sum(v1*v2)
+        return s / len(self)
 
     def profile(
         self,
